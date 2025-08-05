@@ -1,6 +1,7 @@
 package com.mobven.mb_version
 
 import android.app.Activity
+import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Context
 import android.content.pm.PackageInfo
@@ -15,17 +16,19 @@ import android.widget.TextView
 /**
  * A lightweight Android library for displaying app version information as an overlay on all activities.
  * @author Mobven
- * @version 1.0.0
+ * @version 1.0.1
  * @since 1.0.0
  */
 object MBVersionOverlay {
 
     private var isEnabled = false
     private var customText: String? = null
-    private var backgroundColor = Color.parseColor("#19B3CB")
+    private var backgroundColor = Color.parseColor("#AA4444FF")
     private var textColor = Color.WHITE
     private var textSize = 16f
     private var position = Position.BOTTOM
+    private var bottomMargin = 32
+    private var isDraggable = true
 
     enum class Position {
         TOP, BOTTOM
@@ -65,12 +68,16 @@ object MBVersionOverlay {
         textColor: Int = this.textColor,
         textSize: Float = this.textSize,
         position: Position = this.position,
+        bottomMargin: Int = this.bottomMargin,
+        isDraggable: Boolean = this.isDraggable
     ) {
         this.customText = customText
         this.backgroundColor = backgroundColor
         this.textColor = textColor
         this.textSize = textSize
         this.position = position
+        this.bottomMargin = bottomMargin
+        this.isDraggable = isDraggable
     }
 
     /**
@@ -133,6 +140,10 @@ object MBVersionOverlay {
                     Position.TOP -> Gravity.TOP
                     Position.BOTTOM -> Gravity.BOTTOM
                 }
+
+                if (position == Position.BOTTOM) {
+                    bottomMargin = dpToPx(activity, bottomMargin)
+                }
             }
 
             rootView.addView(overlay, params)
@@ -163,6 +174,7 @@ object MBVersionOverlay {
     /**
      * Creates the TextView that displays the version overlay.
      * The TextView is configured with current settings and includes click-to-hide functionality.
+     * If draggable is enabled, adds touch handling for drag & drop functionality.
      *
      * @param context Context used to create the TextView
      * @return Configured TextView ready to be added to a ViewGroup
@@ -178,15 +190,18 @@ object MBVersionOverlay {
             setPadding(16, 8, 16, 8)
             gravity = Gravity.CENTER
 
-            setOnClickListener {
-                visibility = if (visibility == View.VISIBLE) View.GONE else View.VISIBLE
-            }
-
             elevation = 100f
             translationZ = 100f
+
+            if (isDraggable) {
+                setupDragAndDrop(this)
+            } else {
+                setOnClickListener {
+                    visibility = if (visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                }
+            }
         }
     }
-
 
     /**
      * Generates the display text for the overlay.
@@ -238,6 +253,116 @@ object MBVersionOverlay {
             println("MBVersionOverlay: Error getting version code: ${e.message}")
             0L
         }
+    }
+
+    /**
+     * Sets up drag and drop functionality for the overlay view.
+     * Allows users to drag the overlay to any position on screen.
+     *
+     * @param view The TextView to make draggable
+     *
+     * @since 1.0.1
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupDragAndDrop(view: TextView) {
+        var dX = 0f
+        var dY = 0f
+        var lastAction = 0
+
+        view.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    dX = v.x - event.rawX
+                    dY = v.y - event.rawY
+                    lastAction = android.view.MotionEvent.ACTION_DOWN
+                    true
+                }
+
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val newX = event.rawX + dX
+                    val newY = event.rawY + dY
+
+                    val parent = v.parent as? ViewGroup
+                    parent?.let { parentView ->
+                        val maxX = parentView.width - v.width
+                        val maxY = parentView.height - v.height
+
+                        v.x = newX.coerceIn(0f, maxX.toFloat())
+                        v.y = newY.coerceIn(0f, maxY.toFloat())
+                    }
+
+                    lastAction = android.view.MotionEvent.ACTION_MOVE
+                    true
+                }
+
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (lastAction == android.view.MotionEvent.ACTION_DOWN) {
+                        v.visibility = if (v.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                    } else {
+                        snapToEdge(v)
+                    }
+                    true
+                }
+
+                else -> false
+            }
+        }
+    }
+
+    /**
+     * Snaps the overlay to the nearest edge of the screen after dragging.
+     * This provides a cleaner user experience by avoiding overlays in the middle of content.
+     *
+     * @param view The view to snap to edge
+     *
+     * @since 1.0.1
+     */
+    private fun snapToEdge(view: View) {
+        val parent = view.parent as? ViewGroup ?: return
+
+        val parentWidth = parent.width
+        val parentHeight = parent.height
+        val viewWidth = view.width
+        val viewHeight = view.height
+
+        val currentX = view.x
+        val currentY = view.y
+
+        val distanceToRight = parentWidth - currentX - viewWidth
+        val distanceToBottom = parentHeight - currentY - viewHeight
+
+        when (minOf(currentX, distanceToRight, currentY, distanceToBottom)) {
+            currentX -> {
+                view.animate().x(0f).setDuration(200).start()
+            }
+
+            distanceToRight -> {
+                view.animate().x((parentWidth - viewWidth).toFloat()).setDuration(200).start()
+            }
+
+            currentY -> {
+                view.animate().y(0f).setDuration(200).start()
+            }
+
+            distanceToBottom -> {
+                view.animate().y((parentHeight - viewHeight).toFloat()).setDuration(200).start()
+            }
+        }
+    }
+
+
+    /**
+     * Converts DP to pixels based on device density.
+     *
+     * @param context Context to get display metrics
+     * @param dp DP value to convert
+     * @return Pixel value
+     *
+     * @since 1.0.1
+     */
+    private fun dpToPx(context: Context, dp: Int): Int {
+        val density = context.resources.displayMetrics.density
+        return (dp * density).toInt()
     }
 
     /**
