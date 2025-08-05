@@ -142,7 +142,7 @@ object MBVersionOverlay {
                 }
 
                 if (position == Position.BOTTOM) {
-                    bottomMargin = dpToPx(activity, bottomMargin)
+                    bottomMargin = dpToPx(activity, this@MBVersionOverlay.bottomMargin)
                 }
             }
 
