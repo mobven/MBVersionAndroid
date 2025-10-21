@@ -1,34 +1,41 @@
 package com.mobven.mb_version
 
-import android.app.Activity
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.content.pm.PackageInfo
 import android.graphics.Color
 import android.os.Build
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.TextView
+import androidx.core.content.ContextCompat
+import com.mobven.mb_version.MBVersionOverlay.show
+import androidx.core.graphics.toColorInt
 
 /**
  * A lightweight Android library for displaying app version information as an overlay on all activities.
  * @author Mobven
- * @version 1.0.1
+ * @version 1.0.3
  * @since 1.0.0
  */
 object MBVersionOverlay {
 
     private var isEnabled = false
     private var customText: String? = null
-    private var backgroundColor = Color.parseColor("#AA4444FF")
+    private var backgroundColor = "#AA4444FF".toColorInt()
     private var textColor = Color.WHITE
     private var textSize = 16f
     private var position = Position.BOTTOM
     private var bottomMargin = 32
     private var isDraggable = true
+    private var dismissedForSession = false
 
     enum class Position {
         TOP, BOTTOM
@@ -43,12 +50,9 @@ object MBVersionOverlay {
      *
      * @since 1.0.0
      */
-    fun init(
-        application: Application,
-        enabled: Boolean = true
-    ) {
+    fun init(application: Application, enabled: Boolean = true) {
         isEnabled = enabled
-
+        dismissedForSession = false
         if (isEnabled) {
             application.registerActivityLifecycleCallbacks(MBVersionOverlayLifecycleCallback())
         } else {
@@ -91,12 +95,7 @@ object MBVersionOverlay {
      */
     fun show(activity: Activity, show: Boolean = true) {
         if (!isEnabled) return
-
-        if (show) {
-            addOverlayToActivity(activity)
-        } else {
-            removeOverlayFromActivity(activity)
-        }
+        if (show) addOverlayToActivity(activity) else removeOverlayFromActivity(activity)
     }
 
     /**
@@ -108,26 +107,15 @@ object MBVersionOverlay {
      * @since 1.0.0
      */
     internal fun addOverlayToActivity(activity: Activity) {
-        if (!isEnabled) {
-            println("MBVersionOverlay: Not enabled, skipping")
+        if (!isEnabled || dismissedForSession) {
+            println("MBVersionOverlay: Not enabled or dismissed for session, skipping")
             return
         }
-
         activity.runOnUiThread {
-            println("MBVersionOverlay: Adding overlay to ${activity.javaClass.simpleName}")
-
-            val rootView = activity.findViewById<ViewGroup>(android.R.id.content)
-            if (rootView == null) {
-                println("MBVersionOverlay: Root view is null!")
-                return@runOnUiThread
-            }
-
+            val rootView =
+                activity.findViewById<ViewGroup>(android.R.id.content) ?: return@runOnUiThread
             val overlayId = getOverlayId()
-
-            if (rootView.findViewById<View>(overlayId) != null) {
-                println("MBVersionOverlay: Overlay already exists")
-                return@runOnUiThread
-            }
+            if (rootView.findViewById<View>(overlayId) != null) return@runOnUiThread
 
             val overlay = createOverlayView(activity)
             overlay.id = overlayId
@@ -140,14 +128,11 @@ object MBVersionOverlay {
                     Position.TOP -> Gravity.TOP
                     Position.BOTTOM -> Gravity.BOTTOM
                 }
-
                 if (position == Position.BOTTOM) {
                     bottomMargin = dpToPx(activity, this@MBVersionOverlay.bottomMargin)
                 }
             }
-
             rootView.addView(overlay, params)
-            println("MBVersionOverlay: Overlay added successfully")
         }
     }
 
@@ -181,27 +166,69 @@ object MBVersionOverlay {
      *
      * @since 1.0.0
      */
-    private fun createOverlayView(context: Context): TextView {
-        return TextView(context).apply {
-            text = getDisplayText(context)
-            setBackgroundColor(backgroundColor)
-            setTextColor(textColor)
-            textSize = this@MBVersionOverlay.textSize
-            setPadding(16, 8, 16, 8)
-            gravity = Gravity.CENTER
+    @SuppressLint("ClickableViewAccessibility")
+    private fun createOverlayView(context: Context): View {
+        val act = context as Activity
 
+        val container = FrameLayout(context).apply {
+            setBackgroundColor(backgroundColor)
             elevation = 100f
             translationZ = 100f
+            setPadding(
+                dpToPx(context, 4),
+                dpToPx(context, 4),
+                dpToPx(context, 4),
+                dpToPx(context, 4)
+            )
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
 
-            if (isDraggable) {
-                setupDragAndDrop(this)
-            } else {
-                setOnClickListener {
-                    visibility = if (visibility == View.VISIBLE) View.GONE else View.VISIBLE
-                }
+        val tv = TextView(context).apply {
+            text = getDisplayText(context)
+            setTextColor(textColor)
+            textSize = this@MBVersionOverlay.textSize
+            gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginEnd = dpToPx(context, 48)
+                gravity = Gravity.CENTER_VERTICAL
             }
         }
+
+        val close = ImageView(context).apply {
+            id = R.id.mb_version_close_button
+            setPadding(
+                dpToPx(context, 8),
+                dpToPx(context, 8),
+                dpToPx(context, 8),
+                dpToPx(context, 8)
+            )
+            setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            imageTintList = ContextCompat.getColorStateList(context, android.R.color.white)
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.END or Gravity.CENTER_VERTICAL
+            )
+            setOnClickListener {
+                dismissedForSession = true
+                removeOverlayFromActivity(act)
+            }
+        }
+
+        container.addView(tv)
+        container.addView(close)
+
+        if (isDraggable) setupDragOnly(container)
+
+        return container
     }
+
 
     /**
      * Generates the display text for the overlay.
@@ -264,50 +291,54 @@ object MBVersionOverlay {
      * @since 1.0.1
      */
     @SuppressLint("ClickableViewAccessibility")
-    private fun setupDragAndDrop(view: TextView) {
+    private fun setupDragOnly(view: View) {
         var dX = 0f
         var dY = 0f
-        var lastAction = 0
+        var startX = 0f
+        var startY = 0f
+        var dragging = false
+        val slop = ViewConfiguration.get(view.context).scaledTouchSlop
 
-        view.setOnTouchListener { v, event ->
-            when (event.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    dX = v.x - event.rawX
-                    dY = v.y - event.rawY
-                    lastAction = android.view.MotionEvent.ACTION_DOWN
+        view.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    dX = v.x - e.rawX
+                    dY = v.y - e.rawY
+                    startX = e.rawX
+                    startY = e.rawY
+                    dragging = false
+                    v.parent?.requestDisallowInterceptTouchEvent(true)
                     true
                 }
 
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    val newX = event.rawX + dX
-                    val newY = event.rawY + dY
-
-                    val parent = v.parent as? ViewGroup
-                    parent?.let { parentView ->
-                        val maxX = parentView.width - v.width
-                        val maxY = parentView.height - v.height
-
-                        v.x = newX.coerceIn(0f, maxX.toFloat())
-                        v.y = newY.coerceIn(0f, maxY.toFloat())
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - startX
+                    val dy = e.rawY - startY
+                    if (!dragging && (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop)) {
+                        dragging = true
                     }
-
-                    lastAction = android.view.MotionEvent.ACTION_MOVE
-                    true
+                    if (dragging) {
+                        val p = v.parent as? ViewGroup
+                        p?.let {
+                            val newX = (e.rawX + dX).coerceIn(0f, (it.width - v.width).toFloat())
+                            val newY = (e.rawY + dY).coerceIn(0f, (it.height - v.height).toFloat())
+                            v.x = newX; v.y = newY
+                        }
+                        true
+                    } else false
                 }
 
-                android.view.MotionEvent.ACTION_UP -> {
-                    if (lastAction == android.view.MotionEvent.ACTION_DOWN) {
-                        v.visibility = if (v.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-                    } else {
-                        snapToEdge(v)
-                    }
-                    true
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (dragging) {
+                        snapToEdge(v); true
+                    } else false
                 }
 
                 else -> false
             }
         }
     }
+
 
     /**
      * Snaps the overlay to the nearest edge of the screen after dragging.
@@ -367,13 +398,11 @@ object MBVersionOverlay {
 
     /**
      * Generates a unique ID for the overlay view to prevent duplicates and enable easy retrieval.
-     * Uses hash code of a constant string to ensure consistent ID across app lifecycle.
-     *
      * @return Unique integer ID for the overlay view
      *
      * @since 1.0.0
      */
     private fun getOverlayId(): Int {
-        return "mb_version_overlay_view".hashCode()
+        return R.id.mb_version_overlay_view
     }
 }

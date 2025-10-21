@@ -1,0 +1,4 @@
+<resources>
+    <item name="mb_version_close_button" type="id" />
+    <item name="mb_version_overlay_view" type="id" />
+</resources>
